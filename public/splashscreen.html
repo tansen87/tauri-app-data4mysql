@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        .container {
+            margin: 0;
+            padding-top: 10vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .row {
+            display: flex;
+            justify-content: center;
+        }
+
+        .logo {
+            height: 6em;
+            padding: 1.5em;
+            will-change: filter;
+            transition: 0.75s;
+        }
+
+        .logo.github:hover {
+            filter: drop-shadow(0 0 2em #24c8db);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="row">
+            <a href="https://github.com/tansen87/crabSql" target="_blank">
+                <img src="github.svg" class="logo github" alt="Github logo" />
+            </a>
+            
+        </div>
+        <h4>正在启动,请稍等...</h4>
+    </div>
+    <!-- <div class="content">
+        <h2>DR取数</h2>
+        <h4>正在启动,请稍等...</h4>
+    </div> -->
+</body>
+
+</html>

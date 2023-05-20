@@ -1,0 +1,27 @@
+[package]
+name = "data4mysql"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["tansen"]
+license = ""
+repository = ""
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "1.3", features = [] }
+
+[dependencies]
+tauri = { version = "1.3", features = ["api-all"] }
+csv = "1.2.1"
+sqlx = { version = "0.6.3", features = ["mysql", "runtime-tokio-native-tls", "decimal"] }
+tokio = { version="1", features= ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
+rust_decimal = "1.29.1"
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
