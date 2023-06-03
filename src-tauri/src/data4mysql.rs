@@ -25,7 +25,7 @@ pub fn read_yaml(file_path: String) -> Result<Config, Box<dyn Error>> {
     Ok(yaml)
 }
 
-pub async fn query_data(file_path: String) -> Result<(), Box<dyn Error>> {
+pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
     let yaml = read_yaml(file_path)?;
     let mut vec_code: Vec<String> = Vec::new();
     let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
@@ -158,13 +158,20 @@ pub async fn query_data(file_path: String) -> Result<(), Box<dyn Error>> {
         println!("save TB => {}", out_tb);
         company_count += 1;
     }
-    Ok(())
+    let done = work_done();
+    Ok(done)
+}
+
+fn work_done() -> String {
+    "Congratulations! 数据下载成功!".to_string()
 }
 
 #[tauri::command]
-pub fn download(file_path: String) {
+pub fn download(file_path: String) -> String {
     let rt = tokio::runtime::Runtime::new().unwrap();
-    std::thread::spawn(move || rt.block_on(query_data(file_path)).unwrap());
+    let data_done = std::thread::spawn(move || rt.block_on(query_data(file_path)).unwrap());
+    let result_done = data_done.join().unwrap();
+    result_done
 }
 
 #[tauri::command]
@@ -176,3 +183,4 @@ pub async fn close_splashscreen(window: tauri::Window) {
     // Show main window
     window.get_window("main").unwrap().show().unwrap();
 }
+

@@ -8,7 +8,7 @@ import data4mysql from "./components/data4mysql.vue";
   <div class="container">
 
     <div class="row">
-      <a href="https://github.com/tansen87/crabSql" target="_blank">
+      <a href="https://github.com/tansen87/tauri-app-data4mysql" target="_blank">
         <img src="./assets/github.svg" class="logo github" alt="Github logo" />
       </a>
     </div>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from "vue";
-import { open, message } from "@tauri-apps/api/dialog";
+import { open } from "@tauri-apps/api/dialog";
 import { invoke } from "@tauri-apps/api/tauri";
+import Notification from './Notification.vue'
 
 const getDataMsg = ref("");
 const getYamlMsg = ref("");
+const notification = ref();
 const data = reactive({
   filePath: "",
   fileFormats: ["yaml"],
@@ -19,14 +21,18 @@ onMounted(() => {
 // download mysql data
 async function getData() {
   if (data.filePath == "") {
-    await message("未选择yaml文件", "提示");
+    notification.value.warn("未选择yaml文件")
     return;
-  }
+  } 
 
-  await invoke("download", {
-    filePath: data.filePath,
-  });
-  getDataMsg.value = "Downloading..."
+  if (data.filePath != "") {
+    getDataMsg.value = "正在下载,请稍等..."
+    getDataMsg.value = await invoke("download", {
+      filePath: data.filePath,
+    });
+
+    notification.value.success(getDataMsg.value)
+  }
 }
 
 async function selectFile() {
@@ -52,6 +58,10 @@ async function selectFile() {
   getYamlMsg.value = selected.toString();
 }
 
+function onClose() { // 点击默认关闭按钮时触发的回调函数
+  console.log('关闭notification')
+}
+
 </script>
 
 <template>
@@ -64,4 +74,11 @@ async function selectFile() {
   </div>
 
   <p>{{ getDataMsg }}</p>
+
+  <Notification
+        ref="notification"
+        placement="topRight"
+        :duration="5000"
+        :top="20"
+        @close="onClose" />
 </template>

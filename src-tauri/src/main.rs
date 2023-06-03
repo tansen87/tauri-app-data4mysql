@@ -8,7 +8,9 @@ use data4mysql::{download, close_splashscreen};
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            close_splashscreen, download])
+            close_splashscreen, 
+            download
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
