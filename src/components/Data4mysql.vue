@@ -27,11 +27,11 @@ async function getData() {
 
   if (data.filePath != "") {
     getDataMsg.value = "正在下载,请稍等..."
-    getDataMsg.value = await invoke("download", {
-      filePath: data.filePath,
-    });
-
-    notification.value.success(getDataMsg.value)
+    notification.value.info(getDataMsg.value)
+    let value = await invoke("download", { filePath: data.filePath })
+      .then((msg) => notification.value.success(msg))
+      .catch((err) => notification.value.error(err));
+    getDataMsg.value = "<程序运行结束>"
   }
 }
 

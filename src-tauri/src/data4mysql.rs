@@ -2,6 +2,7 @@ use std::{
     error::Error, 
     fs::File, 
     io::BufReader,
+    io::{prelude::*}
 };
 
 use tauri::Manager;
@@ -28,6 +29,7 @@ pub fn read_yaml(file_path: String) -> Result<Config, Box<dyn Error>> {
 pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
     let yaml = read_yaml(file_path)?;
     let mut vec_code: Vec<String> = Vec::new();
+    let mut incorrect_names = Vec::new();
     let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
     for name in &yaml.company_name 
     {
@@ -35,9 +37,32 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
             "SELECT DbName FROM deloitte.b_projectlist WHERE ProjectName = '{}'",
             name
         );
-        let unique_code = query(&sql_query_code).fetch_one(&pool).await?;
+        let unique_code = match query(&sql_query_code).fetch_one(&pool).await {
+            Ok(result) => result,
+            Err(_) => {
+                // If the query fails, add the incorrect name to the list
+                incorrect_names.push(name.to_string());
+                continue;
+            }
+        };
         let code: &str = unique_code.get(0);
         vec_code.push(code.to_string())
+    }
+
+    // Write the incorrect names to a text file
+    if !incorrect_names.is_empty() {
+        let mut file = match File::create(format!("{}/0_error_company.txt", &yaml.save_path)) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("Error creating file: {}", e);
+                return Err(Box::new(e));
+            }
+        };
+        for name in incorrect_names {
+            if let Err(e) = writeln!(file, "{}", name) {
+                eprintln!("Error writing to file: {}", e);
+            }
+        }
     }
 
     let mut company_count = 1;
@@ -167,10 +192,25 @@ fn work_done() -> String {
 }
 
 #[tauri::command]
-pub fn download(file_path: String) -> String {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let data_done = std::thread::spawn(move || rt.block_on(query_data(file_path)).unwrap());
-    let result_done = data_done.join().unwrap();
+pub async fn download(file_path: String) -> String {
+    // let rt = tokio::runtime::Runtime::new().unwrap();
+    // let data_done = std::thread::spawn(move || {
+    //     match rt.block_on(query_data(file_path)) {
+    //         Ok(result) => result,
+    //         Err(error) => {
+    //             eprintln!("Error: {}", error);
+    //             "抱歉,数据下载过程中出现错误。".to_string()
+    //         }
+    //     }
+    // });
+    // let result_done = data_done.join().unwrap();
+    let result_done = match query_data(file_path).await {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            "抱歉,数据下载过程中出现错误。".to_string()
+        }
+    };
     result_done
 }
 
@@ -183,4 +223,3 @@ pub async fn close_splashscreen(window: tauri::Window) {
     // Show main window
     window.get_window("main").unwrap().show().unwrap();
 }
-
