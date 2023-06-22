@@ -26,13 +26,13 @@ pub fn read_yaml(file_path: String) -> Result<Config, Box<dyn Error>> {
     Ok(yaml)
 }
 
-pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
+pub async fn prepare_query_data(file_path: String) -> Result<(Vec<String>, Config), Box<dyn Error>> {
+    // query the code corresponding to the company name
     let yaml = read_yaml(file_path)?;
     let mut vec_code: Vec<String> = Vec::new();
     let mut incorrect_names = Vec::new();
     let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
-    for name in &yaml.company_name 
-    {
+    for name in &yaml.company_name {
         let sql_query_code = format!(
             "SELECT DbName FROM deloitte.b_projectlist WHERE ProjectName = '{}'",
             name
@@ -51,24 +51,31 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
 
     // Write the incorrect names to a text file
     if !incorrect_names.is_empty() {
-        let mut file = match File::create(format!("{}/0_error_company.txt", &yaml.save_path)) {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("Error creating file: {}", e);
-                return Err(Box::new(e));
-            }
-        };
+        let mut file = match File::create(
+            format!("{}/0_failed_company.txt", &yaml.save_path)) {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Error creating file: {}", e);
+                    return Err(Box::new(e));
+                }
+            };
         for name in incorrect_names {
             if let Err(e) = writeln!(file, "{}", name) {
                 eprintln!("Error writing to file: {}", e);
             }
         }
     }
+    Ok((vec_code, yaml))
+}
 
+pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config , window: tauri::Window) -> Result<String, Box<dyn Error>> {
     let mut company_count = 1;
-
+    let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
+    let mut message_log = String::new();
+    // start query data
     for (idx, code) in vec_code.iter().enumerate() 
     {
+        let progress = (idx + 1) as f32 / vec_code.len() as f32;
         let sql_query_len = format!(
             "SELECT COUNT(*) AS length FROM {}.凭证表",
             code
@@ -86,6 +93,7 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
         let mut split_filename = yaml.company_name[idx].split("_");
         let filename = split_filename.nth(2).unwrap_or(&yaml.company_name[idx]);
         println!("<{}> {} - rows => {:?}", company_count, filename, len_gl_vec[0]);
+        let emit_msg = format!("({}) {} - rows: {}", company_count, filename, len_gl_vec[0]);
 
         // query gl
         for _ in (start..=stop).step_by(step) 
@@ -110,7 +118,7 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
             let output_path_multi = format!("{}/{}_GL_{}.csv", yaml.save_path, filename, file_count);
             let output_path = if step_i32 > stop { output_path_single } else { output_path_multi };
             let mut csv_writer_gl = WriterBuilder::new()
-                .delimiter(b'|')
+                .delimiter(b',')
                 .from_path(output_path)?;
 
             csv_writer_gl.write_record(&vec_col_name)?;
@@ -136,9 +144,11 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
             let out_single = format!("{}/{}_GL.csv", yaml.save_path, filename);
             let output_multi = format!("{}/{}_GL_{}.csv", yaml.save_path, filename, file_count);
             let out_gl = if step_i32 > stop { out_single } else { output_multi };
-            println!("save GL => {}", out_gl);
+            
             start += step_i32;
             file_count += 1;
+
+            println!("save GL => {}", out_gl);
         }
 
         // query tb
@@ -157,7 +167,7 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
             }
         let output_path = format!("{}/{}_TB.csv", yaml.save_path, filename);
         let mut csv_writer_tb = WriterBuilder::new()
-            .delimiter(b'|')
+            .delimiter(b',')
             .from_path(output_path)?;
         csv_writer_tb.write_record(&vec_col_name)?;
 
@@ -180,31 +190,29 @@ pub async fn query_data(file_path: String) -> Result<String, Box<dyn Error>> {
         }
         csv_writer_tb.flush()?;
         let out_tb = format!("{}/{}_TB.csv", yaml.save_path, filename);
-        println!("save TB => {}", out_tb);
+        
         company_count += 1;
-    }
-    let done = work_done();
-    Ok(done)
-}
 
-fn work_done() -> String {
-    "Congratulations! 数据下载成功!".to_string()
+        println!("save TB => {}", out_tb);
+        let msg_tb = format!("{}\n", filename);
+
+        message_log.push_str(&msg_tb);
+
+        window.emit("progress", progress*100.0)?;
+        window.emit("message", &emit_msg)?;
+    }
+    let mut successful_file = File::create(
+        format!("{}/1_successful_company.log", &yaml.save_path)
+    ).expect("failed to create file");
+    successful_file.write_all(message_log.as_bytes()).expect("failed to write to file");
+    let msg_done = "Congratulations! 数据下载成功!".to_string();
+    Ok(msg_done)
 }
 
 #[tauri::command]
-pub async fn download(file_path: String) -> String {
-    // let rt = tokio::runtime::Runtime::new().unwrap();
-    // let data_done = std::thread::spawn(move || {
-    //     match rt.block_on(query_data(file_path)) {
-    //         Ok(result) => result,
-    //         Err(error) => {
-    //             eprintln!("Error: {}", error);
-    //             "抱歉,数据下载过程中出现错误。".to_string()
-    //         }
-    //     }
-    // });
-    // let result_done = data_done.join().unwrap();
-    let result_done = match query_data(file_path).await {
+pub async fn download(file_path: String, window: tauri::Window) -> String {
+    let (vec_code, yaml) = prepare_query_data(file_path).await.unwrap();
+    let result_done = match execute_query_data(vec_code, yaml, window).await {
         Ok(result) => result,
         Err(error) => {
             eprintln!("Error: {}", error);

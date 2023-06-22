@@ -2,7 +2,8 @@
 import { ref, reactive, onMounted } from "vue";
 import { open } from "@tauri-apps/api/dialog";
 import { invoke } from "@tauri-apps/api/tauri";
-import Notification from './Notification.vue'
+import Notification from './Notification.vue';
+import { listen } from '@tauri-apps/api/event';
 
 const getDataMsg = ref("");
 const getYamlMsg = ref("");
@@ -15,8 +16,20 @@ const data = reactive({
 onMounted(() => {
   setTimeout(() => {
     invoke("close_splashscreen");
-  }, 2000);
+  }, 1000);
 });
+
+listen('progress', (event) => {
+  const progress = event.payload as number;
+  const progressBar = document.getElementById('progress-bar') as HTMLProgressElement;
+  progressBar.value = progress as number;
+  console.log(progressBar.value);
+})
+
+listen('message', (event) => {
+  const progress = event.payload;
+  notification.value.success(progress)
+})
 
 // download mysql data
 async function getData() {
@@ -27,11 +40,10 @@ async function getData() {
 
   if (data.filePath != "") {
     getDataMsg.value = "正在下载,请稍等..."
-    notification.value.info(getDataMsg.value)
-    let value = await invoke("download", { filePath: data.filePath })
+    let value = await invoke("download", { filePath: data.filePath})
       .then((msg) => notification.value.success(msg))
-      .catch((err) => notification.value.error(err));
-    getDataMsg.value = "<程序运行结束>"
+      .catch((err) => notification.value.error(err))
+    getDataMsg.value = "***程序运行结束***"
   }
 }
 
@@ -75,6 +87,8 @@ function onClose() { // 点击默认关闭按钮时触发的回调函数
 
   <p>{{ getDataMsg }}</p>
 
+  <progress id="progress-bar" max="100" value="0"></progress>
+
   <Notification
         ref="notification"
         placement="topRight"
@@ -82,3 +96,15 @@ function onClose() { // 点击默认关闭按钮时触发的回调函数
         :top="20"
         @close="onClose" />
 </template>
+
+<style>
+  #progress-bar {
+    width: 180px;
+    height: 20px;
+    margin: 0 auto;
+    animation: pg 2s infinite linear;
+  }
+  @keyframes pg {
+      100%{ background-size: 100%; }
+  }
+</style>
