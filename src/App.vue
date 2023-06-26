@@ -6,7 +6,6 @@ import data4mysql from "./components/data4mysql.vue";
 
 <template>
   <div class="container">
-
     <div class="row">
       <a href="https://github.com/tansen87/tauri-app-data4mysql" target="_blank">
         <img src="./assets/github.svg" class="logo github" alt="Github logo" />
@@ -14,8 +13,7 @@ import data4mysql from "./components/data4mysql.vue";
     </div>
 
     <p>Click on the icon to view the source code</p>
-    <p></p>
-
+    <hr/>
     <data4mysql />
 
   </div>

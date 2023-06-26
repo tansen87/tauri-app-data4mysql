@@ -26,6 +26,16 @@ listen('progress', (event) => {
   console.log(progressBar.value);
 })
 
+listen('check', (event) => {
+  const check = event.payload;
+  notification.value.info(check)
+})
+
+listen('errcode', (event) => {
+  const errCode = event.payload;
+  notification.value.error(errCode)
+})
+
 listen('message', (event) => {
   const progress = event.payload;
   notification.value.success(progress)
@@ -81,7 +91,6 @@ function onClose() { // 点击默认关闭按钮时触发的回调函数
     <button type="button" @click="selectFile()">Open Yaml</button>
     <p>{{ getYamlMsg }}</p>
 
-    <p></p>
     <button type="button" @click="getData()">Download</button>
   </div>
 
@@ -89,12 +98,7 @@ function onClose() { // 点击默认关闭按钮时触发的回调函数
 
   <progress id="progress-bar" max="100" value="0"></progress>
 
-  <Notification
-        ref="notification"
-        placement="topRight"
-        :duration="5000"
-        :top="20"
-        @close="onClose" />
+  <Notification ref="notification" placement="topRight" :duration="5000" :top="20" @close="onClose" />
 </template>
 
 <style>
