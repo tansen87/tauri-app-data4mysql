@@ -52,7 +52,7 @@ pub async fn prepare_query_data(file_path: String) -> Result<(Vec<String>, Confi
     // Write the incorrect names to a text file
     if !incorrect_names.is_empty() {
         let mut file = match File::create(
-            format!("{}/0_failed_company.txt", &yaml.save_path)) {
+            format!("{}/0_error_project.log", &yaml.save_path)) {
                 Ok(file) => file,
                 Err(e) => {
                     eprintln!("Error creating file: {}", e);
@@ -209,6 +209,10 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
             Err(error) => {
                 let err_msg = format!("Error with company {}: {}", &company, error);
                 window.emit("errcode", &err_msg)?;
+                let mut file = File::create(
+                    format!("{}/0_error_company.log", &yaml.save_path)
+                ).expect("Failed to create file");
+                file.write_all(err_msg.as_bytes()).expect("Failed to write to file");
                 // println!("{}", err_msg);
                 continue;
             }
