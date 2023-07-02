@@ -1,6 +1,6 @@
 [package]
 name = "data4mysql"
-version = "0.1.2"
+version = "0.1.4"
 description = "A Tauri App"
 authors = ["tansen"]
 license = ""
@@ -20,6 +20,7 @@ tokio = { version="1", features= ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 rust_decimal = "1.29.1"
+chrono = "0.4"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

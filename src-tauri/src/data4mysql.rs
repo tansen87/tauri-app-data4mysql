@@ -1,6 +1,6 @@
 use std::{
     error::Error, 
-    fs::File, 
+    fs::{File, OpenOptions, create_dir}, 
     io::BufReader,
     io::{prelude::*}
 };
@@ -10,6 +10,7 @@ use csv::WriterBuilder;
 use sqlx::{MySqlPool, query, Row, Column};
 use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
+use chrono::Local;
 
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -72,11 +73,21 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
     let mut company_count = 1;
     let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
     let mut message_log = String::new();
+    let _log_file = File::create(
+        format!("{}/2_logs.log", &yaml.save_path)
+    ).expect("Failed to create file"); 
+    let mut log_file = OpenOptions::new()
+        .append(true)
+        .open(format!("{}/2_logs.log", &yaml.save_path))?;
+
     // start query data
     for (idx, code) in vec_code.iter().enumerate() 
     {
         let company = yaml.company_name[idx].split("_").nth(2).unwrap_or(&yaml.company_name[idx]);
         let check_msg = format!("Checking {}, please wait...", &company);
+        let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let check_msg_log = format!("{} => {}\n", &timestamp, &check_msg);
+        log_file.write_all(check_msg_log.as_bytes())?;
         window.emit("check", &check_msg)?;
         let progress = (idx + 1) as f32 / vec_code.len() as f32;
         let sql_query_len = format!(
@@ -99,7 +110,15 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                 let filename = split_filename.nth(2).unwrap_or(&yaml.company_name[idx]);
                 println!("<{}> {} - rows => {:?}", company_count, filename, len_gl_vec[0]);
                 let emit_msg = format!("({}) {} - rows: {}", company_count, filename, len_gl_vec[0]);
+                let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let check_done_log = format!("{} => {}\n", &timestamp, &emit_msg);
+                log_file.write_all(check_done_log.as_bytes())?;
 
+                let folder_path = format!("{}\\{}", &yaml.save_path, &filename);
+                if !folder_exists(&folder_path) {
+                    create_dir(&folder_path)?;
+                }
+                
                 // query gl
                 for _ in (start..=stop).step_by(step) 
                 {
@@ -119,8 +138,8 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                     }
 
                     let step_i32: i32 = step as i32;
-                    let output_path_single = format!("{}/{}_GL.csv", yaml.save_path, filename);
-                    let output_path_multi = format!("{}/{}_GL_{}.csv", yaml.save_path, filename, file_count);
+                    let output_path_single = format!("{}/{}_GL.csv", &folder_path, filename);
+                    let output_path_multi = format!("{}/{}_GL_{}.csv", &folder_path, filename, file_count);
                     let output_path = if step_i32 > stop { output_path_single } else { output_path_multi };
                     let mut csv_writer_gl = WriterBuilder::new()
                         .delimiter(b',')
@@ -146,9 +165,12 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                         csv_writer_gl.serialize(vec_wtr_str)?;
                     }
                     csv_writer_gl.flush()?;
-                    // let out_single = format!("{}/{}_GL.csv", yaml.save_path, filename);
-                    // let output_multi = format!("{}/{}_GL_{}.csv", yaml.save_path, filename, file_count);
-                    // let out_gl = if step_i32 > stop { out_single } else { output_multi };
+                    let out_single = format!("{}\\{}_GL.csv", &folder_path, filename);
+                    let output_multi = format!("{}\\{}_GL_{}.csv", &folder_path, filename, file_count);
+                    let out_gl = if step_i32 > stop { out_single } else { output_multi };
+                    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    let out_gl_log = format!("{} => {}\n", &timestamp, out_gl);
+                    log_file.write_all(out_gl_log.as_bytes())?;
                     
                     start += step_i32;
                     file_count += 1;
@@ -170,7 +192,7 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                         vec_col_name.push(one_tb.column(num).name());
                         vec_col_type.push(one_tb.column(num).type_info().to_string())
                     }
-                let output_path = format!("{}/{}_TB.csv", yaml.save_path, filename);
+                let output_path = format!("{}/{}_TB.csv", &folder_path, filename);
                 let mut csv_writer_tb = WriterBuilder::new()
                     .delimiter(b',')
                     .from_path(output_path)?;
@@ -194,7 +216,10 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                     csv_writer_tb.serialize(vec_wtr_str)?;
                 }
                 csv_writer_tb.flush()?;
-                // let out_tb = format!("{}/{}_TB.csv", yaml.save_path, filename);
+                let out_tb = format!("{}\\{}_TB.csv", &folder_path, filename);
+                let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let out_tb_log = format!("{} => {}\n", &timestamp, out_tb);
+                log_file.write_all(out_tb_log.as_bytes())?;
                 
                 company_count += 1;
 
@@ -208,11 +233,14 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
             },
             Err(error) => {
                 let err_msg = format!("Error with company {}: {}", &company, error);
+                let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let err_msg_log = format!("{} => {}\n", &timestamp, &err_msg);
                 window.emit("errcode", &err_msg)?;
                 let mut file = File::create(
                     format!("{}/0_error_company.log", &yaml.save_path)
                 ).expect("Failed to create file");
                 file.write_all(err_msg.as_bytes()).expect("Failed to write to file");
+                log_file.write_all(&err_msg_log.as_bytes())?;
                 // println!("{}", err_msg);
                 continue;
             }
@@ -224,7 +252,14 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
     ).expect("failed to create file");
     successful_file.write_all(message_log.as_bytes()).expect("failed to write to file");
     let msg_done = "Congratulations! 数据下载成功!".to_string();
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let msg_done_log = format!("{} => {}\n", &timestamp, &msg_done);
+    log_file.write_all(msg_done_log.as_bytes())?;
     Ok(msg_done)
+}
+
+fn folder_exists(path: &str) -> bool {
+    std::fs::metadata(path).is_ok()
 }
 
 #[tauri::command]
