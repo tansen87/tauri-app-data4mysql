@@ -31,6 +31,11 @@ listen('check', (event) => {
   notification.value.info(check)
 })
 
+listen('sqlError', (event) => {
+  const error = event.payload;
+  notification.value.info(error)
+})
+
 listen('errcode', (event) => {
   const errCode = event.payload;
   notification.value.error(errCode)

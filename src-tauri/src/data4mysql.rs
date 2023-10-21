@@ -2,7 +2,7 @@ use std::{
     error::Error, 
     fs::{File, OpenOptions, create_dir}, 
     io::BufReader,
-    io::{prelude::*}
+    io::prelude::*
 };
 
 use tauri::Manager;
@@ -27,12 +27,20 @@ pub fn read_yaml(file_path: String) -> Result<Config, Box<dyn Error>> {
     Ok(yaml)
 }
 
-pub async fn prepare_query_data(file_path: String) -> Result<(Vec<String>, Config), Box<dyn Error>> {
+pub async fn prepare_query_data(file_path: String, window: tauri::Window) -> Result<(Vec<String>, Config), Box<dyn Error>> {
     // query the code corresponding to the company name
     let yaml = read_yaml(file_path)?;
     let mut vec_code: Vec<String> = Vec::new();
     let mut incorrect_names = Vec::new();
-    let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
+    // let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
+    let pool: sqlx::Pool<sqlx::MySql> = match MySqlPool::connect(&yaml.url).await {
+        Ok(pool) => pool,
+        Err(err) => {
+            eprintln!("Error: {:?}", err);
+            window.emit("sqlError", err.to_string()).unwrap();
+            return Err(Box::new(err));
+        }
+    };
     for name in &yaml.company_name {
         let sql_query_code = format!(
             "SELECT DbName FROM deloitte.b_projectlist WHERE ProjectName = '{}'",
@@ -71,17 +79,25 @@ pub async fn prepare_query_data(file_path: String) -> Result<(Vec<String>, Confi
 
 pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tauri::Window) -> Result<String, Box<dyn Error>> {
     let mut company_count = 1;
-    let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
+    let pool: sqlx::Pool<sqlx::MySql> = match MySqlPool::connect(&yaml.url).await {
+        Ok(pool) => pool,
+        Err(err) => {
+            eprintln!("Error: {:?}", err);
+            window.emit("sqlError", err.to_string()).unwrap();
+            return Err(Box::new(err));
+        }
+    };
+    // let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
     let mut message_log = String::new();
-    let _log_file = File::create(
-        format!("{}/2_logs.log", &yaml.save_path)
-    ).expect("Failed to create file"); 
+    // let _log_file = File::create(
+    //     format!("{}/2_logs.log", &yaml.save_path)
+    // ).expect("Failed to create file"); 
     let mut log_file = OpenOptions::new()
         .append(true)
         .open(format!("{}/2_logs.log", &yaml.save_path))?;
 
     // start query data
-    for (idx, code) in vec_code.iter().enumerate() 
+    for (idx, code) in vec_code.iter().enumerate()
     {
         let company = yaml.company_name[idx].split("_").nth(2).unwrap_or(&yaml.company_name[idx]);
         let check_msg = format!("Checking {}, please wait...", &company);
@@ -104,7 +120,7 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                 }
                 let mut start = 0;
                 let stop = len_gl_vec[0];
-                let step = 200_0000;
+                let step = 300_0000;
                 let mut file_count = 1;
                 let mut split_filename = yaml.company_name[idx].split("_");
                 let filename = split_filename.nth(2).unwrap_or(&yaml.company_name[idx]);
@@ -123,8 +139,9 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                 for _ in (start..=stop).step_by(step) 
                 {
                     let sql_query_gl = format!(
-                        "SELECT * FROM {}.凭证表 LIMIT {}, {}",
-                        code, start, step
+                        // "SELECT * FROM {}.凭证表 LIMIT {}, {}",
+                        "SELECT * FROM {}.凭证表 LIMIT {} OFFSET {}",
+                        code, step, start
                     );
                     let data_gl = query(&sql_query_gl).fetch_all(&pool).await?;
 
@@ -142,7 +159,8 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                     let output_path_multi = format!("{}/{}_GL_{}.csv", &folder_path, filename, file_count);
                     let output_path = if step_i32 > stop { output_path_single } else { output_path_multi };
                     let mut csv_writer_gl = WriterBuilder::new()
-                        .delimiter(b',')
+                        .delimiter(b'|')
+                        .quote_style(csv::QuoteStyle::Always)
                         .from_path(output_path)?;
 
                     csv_writer_gl.write_record(&vec_col_name)?;
@@ -194,7 +212,8 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                     }
                 let output_path = format!("{}/{}_TB.csv", &folder_path, filename);
                 let mut csv_writer_tb = WriterBuilder::new()
-                    .delimiter(b',')
+                    .delimiter(b'|')
+                    .quote_style(csv::QuoteStyle::Always)
                     .from_path(output_path)?;
                 csv_writer_tb.write_record(&vec_col_name)?;
 
@@ -264,12 +283,15 @@ fn folder_exists(path: &str) -> bool {
 
 #[tauri::command]
 pub async fn download(file_path: String, window: tauri::Window) -> String {
-    let (vec_code, yaml) = prepare_query_data(file_path).await.unwrap();
+    let window_prepare = window.clone();
+    let window_exec = window.clone();
+    let (vec_code, yaml) = prepare_query_data(file_path, window_prepare).await.unwrap();
     let result_done = match execute_query_data(vec_code, yaml, window).await {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("Error: {}", error);
-            "抱歉,数据下载过程中出现错误。".to_string()
+            // eprintln!("Error: {}", error);
+            window_exec.emit("sqlError", &error.to_string()).unwrap();
+            error.to_string()
         }
     };
     result_done
