@@ -29,11 +29,13 @@ listen('progress', (event) => {
 listen('check', (event) => {
   const check = event.payload;
   notification.value.info(check)
+  console.log(check)
 })
 
 listen('sqlError', (event) => {
   const error = event.payload;
   notification.value.info(error)
+  console.log(error)
 })
 
 listen('errcode', (event) => {
@@ -44,6 +46,7 @@ listen('errcode', (event) => {
 listen('message', (event) => {
   const progress = event.payload;
   notification.value.success(progress)
+  console.log(progress)
 })
 
 // download mysql data
@@ -58,6 +61,7 @@ async function getData() {
     let value = await invoke("download", { filePath: data.filePath})
       .then((msg) => notification.value.success(msg))
       .catch((err) => notification.value.error(err))
+    console.log(value)
     getDataMsg.value = "***程序运行结束***"
   }
 }
@@ -86,7 +90,8 @@ async function selectFile() {
 }
 
 function onClose() { // 点击默认关闭按钮时触发的回调函数
-  console.log('关闭notification')
+  // console.log('关闭notification')
+  return;
 }
 
 </script>
