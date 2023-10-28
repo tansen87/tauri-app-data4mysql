@@ -89,9 +89,9 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
     };
     // let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
     let mut message_log = String::new();
-    // let _log_file = File::create(
-    //     format!("{}/2_logs.log", &yaml.save_path)
-    // ).expect("Failed to create file"); 
+    let _log_file = File::create(
+        format!("{}/2_logs.log", &yaml.save_path)
+    ).expect("Failed to create file"); 
     let mut log_file = OpenOptions::new()
         .append(true)
         .open(format!("{}/2_logs.log", &yaml.save_path))?;
@@ -289,7 +289,7 @@ pub async fn download(file_path: String, window: tauri::Window) -> String {
     let result_done = match execute_query_data(vec_code, yaml, window).await {
         Ok(result) => result,
         Err(error) => {
-            // eprintln!("Error: {}", error);
+            eprintln!("Error: {}", error);
             window_exec.emit("sqlError", &error.to_string()).unwrap();
             error.to_string()
         }
