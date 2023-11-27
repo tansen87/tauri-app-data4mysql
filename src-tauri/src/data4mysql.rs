@@ -11,13 +11,17 @@ use sqlx::{MySqlPool, query, Row, Column};
 use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
 use chrono::Local;
+use futures::TryStreamExt;
 
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     url: String,
     save_path: String,
-    company_name: Vec<String>,
+    // replace_column: String,
+    general_ledger_table: String,
+    trial_balance_table: String,
+    project_name: Vec<String>,
 }
 
 pub fn read_yaml(file_path: String) -> Result<Config, Box<dyn Error>> {
@@ -32,7 +36,6 @@ pub async fn prepare_query_data(file_path: String, window: tauri::Window) -> Res
     let yaml = read_yaml(file_path)?;
     let mut vec_code: Vec<String> = Vec::new();
     let mut incorrect_names = Vec::new();
-    // let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
     let pool: sqlx::Pool<sqlx::MySql> = match MySqlPool::connect(&yaml.url).await {
         Ok(pool) => pool,
         Err(err) => {
@@ -41,7 +44,7 @@ pub async fn prepare_query_data(file_path: String, window: tauri::Window) -> Res
             return Err(Box::new(err));
         }
     };
-    for name in &yaml.company_name {
+    for name in &yaml.project_name {
         let sql_query_code = format!(
             "SELECT DbName FROM deloitte.b_projectlist WHERE ProjectName = '{}'",
             name
@@ -87,7 +90,6 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
             return Err(Box::new(err));
         }
     };
-    // let pool: sqlx::Pool<sqlx::MySql> = MySqlPool::connect(&yaml.url).await?;
     let mut message_log = String::new();
     let _log_file = File::create(
         format!("{}/2_logs.log", &yaml.save_path)
@@ -99,33 +101,34 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
     // start query data
     for (idx, code) in vec_code.iter().enumerate()
     {
-        let company = yaml.company_name[idx].split("_").nth(2).unwrap_or(&yaml.company_name[idx]);
+        let company = yaml.project_name[idx].split("_").nth(2).unwrap_or(&yaml.project_name[idx]);
         let check_msg = format!("Checking {}, please wait...", &company);
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let check_msg_log = format!("{} => {}\n", &timestamp, &check_msg);
         log_file.write_all(check_msg_log.as_bytes())?;
         window.emit("check", &check_msg)?;
         let progress = (idx + 1) as f32 / vec_code.len() as f32;
-        let sql_query_len = format!(
-            "SELECT COUNT(*) AS length FROM {}.凭证表",
-            code
-        );
-        match query(&sql_query_len).fetch_all(&pool).await 
+        
+        // query gl headers
+        let sql_query_header = format!("SELECT * FROM {}.{} LIMIT 10", code, &yaml.general_ledger_table);
+        match query(&sql_query_header).fetch_one(&pool).await 
         {
             Ok(rows) => {
-                let mut len_gl_vec = Vec::new();
-                for row in rows {
-                    let get_len_gl: i32 = row.get("length");
-                    len_gl_vec.push(get_len_gl)
+                let col_num = rows.columns().len();
+                let mut vec_col_name: Vec<&str> = Vec::new();
+                let mut vec_col_type: Vec<String> = Vec::new();
+                for num in 0..col_num {
+                    vec_col_name.push(rows.column(num).name());
+                    vec_col_type.push(rows.column(num).type_info().to_string())
                 }
-                let mut start = 0;
-                let stop = len_gl_vec[0];
-                let step = 300_0000;
-                let mut file_count = 1;
-                let mut split_filename = yaml.company_name[idx].split("_");
-                let filename = split_filename.nth(2).unwrap_or(&yaml.company_name[idx]);
-                println!("<{}> {} - rows => {:?}", company_count, filename, len_gl_vec[0]);
-                let emit_msg = format!("({}) {} - rows: {}", company_count, filename, len_gl_vec[0]);
+                
+                // query gl data
+                let sql_query_gl = format!("SELECT * FROM {}.{}", code, &yaml.general_ledger_table);
+                let mut stream = query(&sql_query_gl).fetch(&pool);
+                let mut split_filename = yaml.project_name[idx].split("_");
+                let filename = split_filename.nth(2).unwrap_or(&yaml.project_name[idx]);
+
+                let emit_msg = format!("({}) {}", company_count, filename);
                 let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 let check_done_log = format!("{} => {}\n", &timestamp, &emit_msg);
                 log_file.write_all(check_done_log.as_bytes())?;
@@ -134,73 +137,54 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                 if !folder_exists(&folder_path) {
                     create_dir(&folder_path)?;
                 }
-                
-                // query gl
-                for _ in (start..=stop).step_by(step) 
+
+                // gl save path
+                let gl_output_path = format!("{}\\{}_{}.csv", &folder_path, filename, &yaml.general_ledger_table);
+                let mut csv_writer_gl = WriterBuilder::new()
+                    .delimiter(b'|')
+                    .from_path(gl_output_path)?;
+                // write gl headers
+                csv_writer_gl.serialize(vec_col_name.clone())?;
+                while let Some(row) = stream.try_next().await? 
                 {
-                    let sql_query_gl = format!(
-                        // "SELECT * FROM {}.凭证表 LIMIT {}, {}",
-                        "SELECT * FROM {}.凭证表 LIMIT {} OFFSET {}",
-                        code, step, start
-                    );
-                    let data_gl = query(&sql_query_gl).fetch_all(&pool).await?;
-
-                    let one_gl = query(&sql_query_gl).fetch_one(&pool).await?;
-                    let col_num = one_gl.columns().len();
-                    let mut vec_col_name = Vec::new();
-                    let mut vec_col_type = Vec::new();
-                    for num in 0..col_num {
-                        vec_col_name.push(one_gl.column(num).name());
-                        vec_col_type.push(one_gl.column(num).type_info().to_string())
-                    }
-
-                    let step_i32: i32 = step as i32;
-                    let output_path_single = format!("{}/{}_GL.csv", &folder_path, filename);
-                    let output_path_multi = format!("{}/{}_GL_{}.csv", &folder_path, filename, file_count);
-                    let output_path = if step_i32 > stop { output_path_single } else { output_path_multi };
-                    let mut csv_writer_gl = WriterBuilder::new()
-                        .delimiter(b'|')
-                        .quote_style(csv::QuoteStyle::Always)
-                        .from_path(output_path)?;
-
-                    csv_writer_gl.write_record(&vec_col_name)?;
-
-                    for data in data_gl 
+                    let mut vec_wtr_str = Vec::new();
+                    for num in 0..col_num 
                     {
-                        let mut vec_wtr_str = Vec::new();
-                        for num in 0..col_num {
-                            if vec_col_type[num] == "DECIMAL" {
-                                let num: Decimal = data.get(num);
-                                vec_wtr_str.push(num.to_string())
-                            } else if vec_col_type[num] == "SMALLINT" || vec_col_type[num] == "TINYINT" {
-                                let num: i32 = data.get(num);
-                                vec_wtr_str.push(num.to_string())
-                            } else {
-                                let num: &str = data.get(num);
-                                vec_wtr_str.push(num.to_string())
+                        let value = match &vec_col_type[num][..] 
+                        {
+                            "DECIMAL" => {
+                                let num: Decimal = row.get(num);
+                                num.to_string()
                             }
-                        }
-                        csv_writer_gl.serialize(vec_wtr_str)?;
+                            "SMALLINT" | "TINYINT" | "INT" => {
+                                let num: i32 = row.get(num);
+                                num.to_string()
+                            }
+                            "INT UNSIGNED" => {
+                                let num: u32 = row.get(num);
+                                num.to_string()
+                            }
+                            // _ if vec_col_name[num] == &yaml.replace_column && &yaml.general_ledger_table == "凭证表" => {
+                            //     let value: &str = row.get(num);
+                            //     value.replace("|", "")
+                            // }
+                            _ => {
+                                let num: &str = row.get(num);
+                                num.to_string()
+                            }
+                        };
+                        vec_wtr_str.push(value);
                     }
-                    csv_writer_gl.flush()?;
-                    let out_single = format!("{}\\{}_GL.csv", &folder_path, filename);
-                    let output_multi = format!("{}\\{}_GL_{}.csv", &folder_path, filename, file_count);
-                    let out_gl = if step_i32 > stop { out_single } else { output_multi };
-                    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    let out_gl_log = format!("{} => {}\n", &timestamp, out_gl);
-                    log_file.write_all(out_gl_log.as_bytes())?;
-                    
-                    start += step_i32;
-                    file_count += 1;
-
-                    // println!("save GL => {}", out_gl);
+                    csv_writer_gl.serialize(vec_wtr_str)?;
                 }
+                csv_writer_gl.flush()?;
+                let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let out_gl = format!("{}\\{}_{}.csv", &folder_path, filename, &yaml.general_ledger_table);
+                let out_gl_log = format!("{} => {}\n", &timestamp, out_gl);
+                log_file.write_all(out_gl_log.as_bytes())?;
 
                 // query tb
-                let sql_query_tb = format!(
-                    "SELECT * FROM {}.科目余额表", 
-                    code
-                );
+                let sql_query_tb = format!("SELECT * FROM {}.{}", code, &yaml.trial_balance_table);
                 let data_tb = query(&sql_query_tb).fetch_all(&pool).await?;
                 let one_tb = query(&sql_query_tb).fetch_one(&pool).await?;
                     let col_num = one_tb.columns().len();
@@ -210,10 +194,10 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                         vec_col_name.push(one_tb.column(num).name());
                         vec_col_type.push(one_tb.column(num).type_info().to_string())
                     }
-                let output_path = format!("{}/{}_TB.csv", &folder_path, filename);
+                let output_path = format!("{}\\{}_{}.csv", &folder_path, filename, &yaml.trial_balance_table);
                 let mut csv_writer_tb = WriterBuilder::new()
                     .delimiter(b'|')
-                    .quote_style(csv::QuoteStyle::Always)
+                    // .quote_style(csv::QuoteStyle::Always)
                     .from_path(output_path)?;
                 csv_writer_tb.write_record(&vec_col_name)?;
 
@@ -235,14 +219,13 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                     csv_writer_tb.serialize(vec_wtr_str)?;
                 }
                 csv_writer_tb.flush()?;
-                let out_tb = format!("{}\\{}_TB.csv", &folder_path, filename);
+                let out_tb = format!("{}\\{}_{}.csv", &folder_path, filename, &yaml.trial_balance_table);
                 let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 let out_tb_log = format!("{} => {}\n", &timestamp, out_tb);
                 log_file.write_all(out_tb_log.as_bytes())?;
                 
                 company_count += 1;
 
-                // println!("save TB => {}", out_tb);
                 let msg_tb = format!("{}\n", filename);
 
                 message_log.push_str(&msg_tb);
