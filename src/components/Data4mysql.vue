@@ -34,7 +34,7 @@ listen('check', (event) => {
 
 listen('sqlError', (event) => {
   const error = event.payload;
-  notification.value.info(error)
+  notification.value.error(error)
   console.log(error)
 })
 
