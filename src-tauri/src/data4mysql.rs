@@ -18,7 +18,7 @@ use futures::TryStreamExt;
 pub struct Config {
     url: String,
     save_path: String,
-    // replace_column: String,
+    replace_column: String,
     general_ledger_table: String,
     trial_balance_table: String,
     project_name: Vec<String>,
@@ -164,10 +164,10 @@ pub async fn execute_query_data(vec_code: Vec<String>, yaml: Config, window: tau
                                 let num: u32 = row.get(num);
                                 num.to_string()
                             }
-                            // _ if vec_col_name[num] == &yaml.replace_column && &yaml.general_ledger_table == "凭证表" => {
-                            //     let value: &str = row.get(num);
-                            //     value.replace("|", "")
-                            // }
+                            _ if vec_col_name[num] == &yaml.replace_column && &yaml.general_ledger_table == "凭证表" => {
+                                let value: &str = row.get(num);
+                                value.replace("|", "").to_string()
+                            }
                             _ => {
                                 let num: &str = row.get(num);
                                 num.to_string()
@@ -267,8 +267,16 @@ fn folder_exists(path: &str) -> bool {
 #[tauri::command]
 pub async fn download(file_path: String, window: tauri::Window) -> String {
     let window_prepare = window.clone();
+    let window_prepare_err_handle = window.clone();
     let window_exec = window.clone();
-    let (vec_code, yaml) = prepare_query_data(file_path, window_prepare).await.unwrap();
+    let (vec_code, yaml) = match prepare_query_data(file_path, window_prepare).await {
+        Ok((vec_code, yaml)) => (vec_code, yaml),
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            window_prepare_err_handle.emit("sqlError", &error.to_string()).unwrap();
+            return error.to_string();
+        }
+    };
     let result_done = match execute_query_data(vec_code, yaml, window).await {
         Ok(result) => result,
         Err(error) => {
